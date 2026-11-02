@@ -67,9 +67,18 @@ class RuntimeReady:
     cuda_available: bool
 
 
+def _venv_bin_dir(venv_path: Path) -> Path:
+    return venv_path / ("Scripts" if sys.platform.startswith("win") else "bin")
+
+
+def _venv_python_executable(venv_path: Path) -> Path:
+    exe_name = "python.exe" if sys.platform.startswith("win") else "python"
+    return _venv_bin_dir(venv_path) / exe_name
+
+
 def runtime_status(root: Path) -> RuntimeStatus:
     venv_path = root / "venv"
-    python_executable = venv_path / "bin" / "python"
+    python_executable = _venv_python_executable(venv_path)
     runtime_json = root / "runtime.json"
     if not runtime_json.exists() or not python_executable.exists():
         return RuntimeStatus(
@@ -219,6 +228,9 @@ def _validate_runtime(root: Path) -> RuntimeReady:
 
 
 def _site_packages_path(python_executable: Path) -> Path:
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
+    )
     completed = subprocess.run(
         [
             str(python_executable),
@@ -228,6 +240,7 @@ def _site_packages_path(python_executable: Path) -> Path:
         check=True,
         capture_output=True,
         text=True,
+        creationflags=creationflags,
     )
     return Path(completed.stdout.strip())
 
@@ -247,7 +260,9 @@ def _write_runtime_json(root: Path, ready: RuntimeReady) -> None:
 def _activate_runtime(ready: RuntimeReady) -> None:
     _activate_runtime_path(ready.site_packages, ready.python_executable)
     os.environ["VIRTUAL_ENV"] = str(ready.venv_path)
-    os.environ["PATH"] = str(ready.venv_path / "bin") + os.pathsep + os.environ.get("PATH", "")
+    os.environ["PATH"] = (
+        str(_venv_bin_dir(ready.venv_path)) + os.pathsep + os.environ.get("PATH", "")
+    )
 
 
 def _activate_runtime_path(site_packages: Path, python_executable: Path) -> None:
@@ -266,12 +281,16 @@ def _run_process(
     _check_cancelled(context)
     env = os.environ.copy()
     env.update(extra_env)
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
+    )
     process = subprocess.Popen(
         command,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        creationflags=creationflags,
     )
     if context is not None:
         context.set_active_process(process)

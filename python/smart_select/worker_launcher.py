@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -37,6 +38,37 @@ def _format_value(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def _exec_or_run(cmd: list[str], env: dict[str, str]) -> NoReturn:
+    if sys.platform.startswith("win"):
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(cmd, env=env, creationflags=creationflags)
+        raise SystemExit(completed.returncode)
+    os.execvpe(cmd[0], cmd, env)
+    raise SystemExit(127)
+
+
+def _find_python_via_uv(uv: str, env: dict[str, str]) -> str | None:
+    creationflags = (
+        getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
+    )
+    try:
+        res = subprocess.run(
+            [uv, "python", "find", "--no-project", "--system", RUNTIME_WORKER_PYTHON],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=creationflags,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            candidate = res.stdout.strip().splitlines()[-1].strip()
+            if Path(candidate).exists():
+                return candidate
+    except Exception:
+        pass
+    return None
+
+
 def main() -> NoReturn:
     if len(sys.argv) < 2:
         print(
@@ -47,43 +79,28 @@ def main() -> NoReturn:
         raise SystemExit(2)
 
     uv = shutil.which("uv")
-    if uv is None:
-        print(
-            format_log_event("worker.launcher.failed", **{"error.reason": "uv_not_found"}),
-            file=sys.stderr,
-            flush=True,
-        )
-        # On Windows there is no python3, use python or sys.executable
-        python_bin = shutil.which("python3") or shutil.which("python") or sys.executable
-        os.execvp(python_bin, [python_bin, *sys.argv[1:]])
-
-    print(
-        format_log_event(
-            "worker.launcher.exec",
-            **{
-                "launcher.mode": "uv",
-                "runtime.python.version": RUNTIME_WORKER_PYTHON,
-            },
-        ),
-        file=sys.stderr,
-        flush=True,
-    )
     env = os.environ.copy()
     _configure_cuda_environment(env)
-    os.execvpe(
-        uv,
-        [
-            uv,
-            "run",
-            "--no-project",
-            "--python",
-            RUNTIME_WORKER_PYTHON,
-            "python",
-            *sys.argv[1:],
-        ],
-        env,
-    )
-    raise SystemExit(127)
+
+    if uv is not None:
+        py312 = _find_python_via_uv(uv, env)
+        if py312 is not None:
+            print(
+                format_log_event(
+                    "worker.launcher.exec",
+                    **{
+                        "launcher.mode": "uv-python-find",
+                        "runtime.python.version": RUNTIME_WORKER_PYTHON,
+                        "python.executable": py312,
+                    },
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            _exec_or_run([py312, *sys.argv[1:]], env)
+
+    python_bin = shutil.which("python3") or shutil.which("python") or sys.executable
+    _exec_or_run([python_bin, *sys.argv[1:]], env)
 
 
 def _configure_cuda_environment(env: dict[str, str]) -> None:
@@ -115,7 +132,6 @@ def _detect_cuda_home(env: dict[str, str]) -> Path | None:
             return Path(value)
 
     if sys.platform.startswith("win"):
-        # Windows CUDA is typically installed under Program Files
         program_files = env.get("ProgramFiles", r"C:\Program Files")
         for candidate in (
             Path(program_files) / "NVIDIA GPU Computing Toolkit" / "CUDA" / "v12.4",
@@ -145,7 +161,6 @@ def _detect_cuda_home(env: dict[str, str]) -> Path | None:
 
 def _is_cuda_home(path: Path) -> bool:
     if sys.platform.startswith("win"):
-        # On Windows, nvcc is nvcc.exe and libs are under lib/x64
         return (path / "bin" / "nvcc.exe").exists() and (
             (path / "lib" / "x64").exists() or (path / "lib").exists()
         )

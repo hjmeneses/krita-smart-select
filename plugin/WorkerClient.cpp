@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 
 namespace
 {
@@ -64,8 +65,38 @@ bool WorkerClient::start(const QString& pythonExecutable, const QString& workerS
               QStringList { QStringLiteral("PYTHONHOME"), QStringLiteral("PYTHONPATH"),
                   QStringLiteral("PYTHONUSERBASE"), QStringLiteral("LD_LIBRARY_PATH") } },
             { QStringLiteral("python.no_user_site"), true } });
-    m_process.start(pythonExecutable, QStringList { workerScript });
-    if (!m_process.waitForStarted(1000)) {
+
+    QString program = pythonExecutable;
+    QStringList args { workerScript };
+
+#ifdef Q_OS_WIN
+    if (program.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive)) {
+        QString hostPython = QStandardPaths::findExecutable(QStringLiteral("python"));
+        if (hostPython.isEmpty()) {
+            hostPython = QStandardPaths::findExecutable(QStringLiteral("python3"));
+        }
+        if (!hostPython.isEmpty()) {
+            args.prepend(program);
+            program = hostPython;
+        } else {
+            QString uvExe = QStandardPaths::findExecutable(QStringLiteral("uv"));
+            if (!uvExe.isEmpty()) {
+                args = QStringList {
+                    QStringLiteral("run"),
+                    QStringLiteral("--no-project"),
+                    QStringLiteral("--python"),
+                    QStringLiteral("3.12"),
+                    QStringLiteral("python"),
+                    workerScript,
+                };
+                program = uvExe;
+            }
+        }
+    }
+#endif
+
+    m_process.start(program, args);
+    if (!m_process.waitForStarted(5000)) {
         Q_EMIT crashed(m_process.errorString());
         return false;
     }

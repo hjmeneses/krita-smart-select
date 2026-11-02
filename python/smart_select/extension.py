@@ -46,6 +46,7 @@ class SmartSelectExtension(Extension):
     def __init__(self, parent: object) -> None:
         super().__init__(parent)
         self._library: ctypes.CDLL | None = None
+        self._dll_dir_handle: Any = None
 
     def setup(self) -> None:
         self._load_native_plugin()
@@ -59,7 +60,7 @@ class SmartSelectExtension(Extension):
         _log_event(
             "setup.start",
             **{
-                "plugin.version": "0.1.0-mvp",
+                "plugin.version": "0.1.1-windows",
                 "runtime.python.version": sys.version.split()[0],
                 "python.executable.path": sys.executable,
                 "platform.name": platform.platform(),
@@ -96,10 +97,14 @@ class SmartSelectExtension(Extension):
         if sys.platform.startswith("linux"):
             existing = os.environ.get("LD_LIBRARY_PATH", "")
             os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else str(lib_dir)
-        elif sys.platform == "win":
-            # On Windows, prepend the lib dir to PATH so dependent DLLs resolve
+        elif sys.platform.startswith("win"):
             existing = os.environ.get("PATH", "")
             os.environ["PATH"] = f"{lib_dir}{os.pathsep}{existing}" if existing else str(lib_dir)
+            if hasattr(os, "add_dll_directory") and lib_dir.exists():
+                try:
+                    self._dll_dir_handle = os.add_dll_directory(str(lib_dir))
+                except OSError:
+                    pass
 
         for candidate in candidates:
             if candidate.exists():
@@ -143,4 +148,4 @@ def _worker_executable(package_dir: Path) -> str:
     launcher = package_dir / "worker_launcher.py"
     if launcher.exists() and shutil.which("uv") is not None:
         return str(launcher)
-    return shutil.which("python3") or sys.executable
+    return shutil.which("python3") or shutil.which("python") or sys.executable

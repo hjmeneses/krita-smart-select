@@ -92,6 +92,30 @@ def release_runtime_memory() -> None:
     )
 
 
+def _candidate_attempts(
+    torch: Any, cuda_available: bool, default_resolution: int
+) -> list[tuple[str, int]]:
+    if not cuda_available:
+        return [("cpu", min(default_resolution, 1024))]
+
+    total_vram_gb = 8.0
+    with suppress(Exception):
+        props = torch.cuda.get_device_properties(0)
+        total_vram_gb = float(props.total_memory) / (1024.0**3)
+
+    if total_vram_gb < 6.5:
+        return [
+            ("cuda", min(default_resolution, 1024)),
+            ("cuda", 768),
+            ("cpu", 1024),
+        ]
+    return [
+        ("cuda", default_resolution),
+        ("cuda", 1024),
+        ("cpu", 1024),
+    ]
+
+
 def predict_alpha(
     spec: ModelSpec,
     snapshot_dir: Path,
@@ -104,37 +128,53 @@ def predict_alpha(
     transforms = importlib.import_module("torchvision.transforms")
 
     cuda_available = bool(torch.cuda.is_available())
-    device = "cuda" if cuda_available else "cpu"
     crop_image = image_module.fromarray(crop_image_array).convert("RGB")
     width, height = crop_image.size
 
-    try:
-        model = _load_model(spec, snapshot_dir, device)
-        image_tensor = _preprocess_image(crop_image, spec.input_resolution, transforms)
-        image_tensor = image_tensor.unsqueeze(0).to(device)
-        if device == "cuda":
-            image_tensor = image_tensor.half()
+    attempts = _candidate_attempts(torch, cuda_available, spec.input_resolution)
+    prediction: Any = None
+    used_device = "cpu"
+    duration_ms = 0
+    last_exc: Exception | None = None
 
-        log_event(
-            "alpha_model.predict.start",
-            component="birefnet",
-            **{
-                "model.id": spec.id,
-                "device.type": device,
-                "image.width": width,
-                "image.height": height,
-            },
-        )
-        started = time.monotonic()
-        with torch.inference_mode():
-            prediction = model(image_tensor)[-1].sigmoid().detach().cpu()
-        duration_ms = round((time.monotonic() - started) * 1000)
-    except RuntimeError as exc:
-        if "out of memory" in str(exc).lower():
-            raise InferenceOutOfMemory("alpha extraction ran out of GPU memory") from exc
-        raise InferenceFailed("alpha extraction failed") from exc
-    except Exception as exc:
-        raise InferenceFailed("alpha extraction failed") from exc
+    for attempt_device, attempt_res in attempts:
+        try:
+            model = _load_model(spec, snapshot_dir, attempt_device)
+            image_tensor = _preprocess_image(crop_image, attempt_res, transforms)
+            image_tensor = image_tensor.unsqueeze(0).to(attempt_device)
+            if attempt_device == "cuda":
+                image_tensor = image_tensor.half()
+
+            log_event(
+                "alpha_model.predict.start",
+                component="birefnet",
+                **{
+                    "model.id": spec.id,
+                    "device.type": attempt_device,
+                    "input.resolution": attempt_res,
+                    "image.width": width,
+                    "image.height": height,
+                },
+            )
+            started = time.monotonic()
+            with torch.inference_mode():
+                prediction = model(image_tensor)[-1].sigmoid().detach().cpu()
+            duration_ms = round((time.monotonic() - started) * 1000)
+            used_device = attempt_device
+            break
+        except RuntimeError as exc:
+            last_exc = exc
+            if "out of memory" in str(exc).lower():
+                release_runtime_memory()
+                continue
+            raise InferenceFailed("alpha extraction failed") from exc
+        except Exception as exc:
+            raise InferenceFailed("alpha extraction failed") from exc
+
+    if prediction is None:
+        if last_exc is not None and "out of memory" in str(last_exc).lower():
+            raise InferenceOutOfMemory("alpha extraction ran out of GPU memory") from last_exc
+        raise InferenceFailed("alpha extraction failed")
 
     pred = prediction[0].squeeze().float()
     pred_image = transforms.ToPILImage()(pred)
@@ -147,7 +187,7 @@ def predict_alpha(
         component="birefnet",
         **{
             "model.id": spec.id,
-            "device.type": device,
+            "device.type": used_device,
             "duration_ms": duration_ms,
             "image.width": width,
             "image.height": height,
@@ -157,7 +197,7 @@ def predict_alpha(
         crop_alpha=alpha_bytes,
         width=width,
         height=height,
-        device=device,
+        device=used_device,
         torch_version=str(torch.__version__),
         cuda_available=cuda_available,
         duration_ms=duration_ms,
