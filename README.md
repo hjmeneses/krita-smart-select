@@ -1,60 +1,45 @@
-# Krita Smart Select for Windows
+# Krita Smart Select (Windows & Linux)
 
-A Windows port of [Krita Smart Select](https://github.com/BMFreed/krita-smart-select)
-— an AI-assisted lasso selection plugin for Krita that creates soft alpha object
-masks locally using BiRefNet HR Matting.
+A cross-platform **Windows & Linux** edition of [Krita Smart Select](https://github.com/BMFreed/krita-smart-select)
+— an AI-assisted lasso selection plugin for Krita 5.3.x that creates soft alpha object
+masks locally using **BiRefNet HR Matting**.
 
-This is a **sister project**, not a fork-and-replace. The original project by
-[BMFreed](https://github.com/BMFreed) targets Linux + Krita 5.3.1. This project
-adds Windows build support, native DLL packaging, and cross-platform Python
-fixes while keeping the C++ plugin source and worker code in sync with upstream.
+> **📦 Pre-built Windows Release Available:** Download **`krita-smart-select-windows-x64-0.1.1.zip`** directly from [**Releases**](https://github.com/hjmeneses/krita-smart-select/releases/latest) — no C++ compilation required.
 
 ## Relationship to Upstream
 
-| | Upstream (BMFreed) | This project |
+The original project by [BMFreed](https://github.com/BMFreed/krita-smart-select) targets Linux + Krita 5.3.1, and [theCosmicCrafter/krita-smart-select-windows](https://github.com/theCosmicCrafter/krita-smart-select-windows) documented the initial KDE CI Qt5 build setup. This fork completes the Windows port, ships pre-compiled Windows binaries (`kritasmartselect.dll`), fixes Windows Python runtime/process launching, adds a fast incremental C++ build script, and introduces automatic low-VRAM scaling for GPUs with 4–6 GB VRAM.
+
+| | Upstream (`BMFreed`) | This Fork (`hjmeneses`) |
 | --- | --- | --- |
-| **Platform** | Linux | Windows |
-| **Compiler** | GCC | LLVM-MinGW Clang 21 |
-| **Qt/Krita deps** | System packages | KDE CI artifact cache |
-| **Native artifact** | `kritasmartselect.so` | `kritasmartselect.dll` |
-| **Runtime DLLs** | — | `libc++.dll`, `libunwind.dll`, `libwinpthread-1.dll` |
-| **License** | GPL-3.0-only | GPL-3.0-only (same) |
-
-**Shared code** (kept in sync with upstream):
-- C++ plugin source (`plugin/`)
-- Python worker (`worker/`)
-- Worker protocol, model config, docs
-
-**Windows-specific** (this project only):
-- `scripts/build-windows.bat` — Windows build script
-- `scripts/package-windows.ps1` — Windows release packaging
-- `docs/windows/build.md` — Windows build documentation
-- Cross-platform fixes in `python/smart_select/extension.py` and
-  `python/smart_select/worker_launcher.py`
+| **Platform** | Linux | **Windows 10/11 (x64)** & Linux |
+| **Pre-built Release** | Linux `.zip` / `.tar.gz` | **Windows `.zip`** (`krita-smart-select-windows-x64-0.1.1.zip`) |
+| **Compiler** | GCC | LLVM-MinGW Clang (UCRT x86_64) / GCC |
+| **Qt/Krita deps** | System packages | KDE CI artifact cache + installed Krita 5.3.x ABI |
+| **Native artifact** | `kritasmartselect.so` | `kritasmartselect.dll` + Clang runtime DLLs |
+| **GPU VRAM Support** | 8 GB+ (`2048×2048`) | **4 GB+ auto-scaling** (`2048×2048` / `1024×1024` / `768×768` FP16 + CPU fallback) |
+| **License** | GPL-3.0-only | GPL-3.0-only |
 
 ## How It Works
 
-Krita Smart Select is a plugin for Krita 5.3.x that creates soft
-AI-assisted selections from a user-drawn region.
-
-It is designed as a local Krita AI selection, object selection and alpha
-matting plugin for digital artists.
+Krita Smart Select is a native canvas tool for **Krita 5.3.x** that creates soft
+AI-assisted selections from a user-drawn lasso region.
 
 The tool works like a native lasso selection tool first: draw or adjust the
-area around an object, then press `Select object with AI`. The worker runs
-BiRefNet HR Matting on the selected crop and applies the returned soft alpha as
-a Krita selection.
+area around an object, then press **`Select object with AI`** in the Tool Options docker. The background worker runs
+`BiRefNet HR Matting` on the selected crop and applies the returned soft alpha as
+a standard Krita pixel selection.
 
 ## Features
 
 - Native Krita canvas tool and Tool Options integration.
-- Replace/add/subtract/intersect selection actions through Krita selection
-  semantics.
-- Soft alpha selection masks instead of binary-only selections.
-- Managed user-level Python runtime for inference dependencies.
-- Pinned BiRefNet HR Matting model snapshot cache.
+- Replace / add / subtract / intersect selection actions through Krita selection
+  semantics (`Shift`, `Alt`, etc.).
+- Soft alpha selection masks instead of binary-only cutouts (preserves hair, glass, and semi-transparent edges).
+- Managed user-level Python 3.12 runtime for inference dependencies (`%APPDATA%\krita\smart_select\runtime` on Windows).
+- Pinned BiRefNet HR Matting model snapshot cache (`%APPDATA%\krita\smart_select\models` on Windows).
+- Automatic VRAM-aware resolution scaling (`2048×2048` on 8 GB+ GPUs, `1024×1024` / `768×768` on 4–6 GB GPUs, or CPU fallback).
 - Local structured logs with OpenTelemetry-compatible field names.
-- Debug image export for local diagnosis when explicitly enabled.
 
 ## Examples
 
@@ -80,166 +65,89 @@ hard binary cutout.
 | --- | --- |
 | <img src="docs/assets/examples/car-before.png" alt="Lasso region around a car" width="420"> | <img src="docs/assets/examples/car-after.png" alt="AI selection result for the car" width="420"> |
 
-## Requirements
+## Requirements & GPU Compatibility
 
-For users:
+### System Requirements
+- **OS:** Windows 10/11 (x64) or Linux (x64).
+- **Krita:** **5.3.x** (tested on Krita 5.3.4.1 on Windows and 5.3.1 on Linux).
+- **`uv` in `PATH`** with Python 3.12 available.
+  - On Windows, install `uv` and Python 3.12 in PowerShell with:
+    ```powershell
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    uv python install 3.12
+    ```
+- **Disk Space:** ~3.5 GB of free space in `%APPDATA%\krita\smart_select` for the self-managed PyTorch CUDA runtime (~2.5 GB) and `BiRefNet_HR-matting` model weights (~444 MB).
 
-- Windows 10/11 (x64) or Linux.
-- Krita 5.3.x.
-- `uv` available in `PATH`.
-- Network access for the first runtime and model download.
-- NVIDIA driver with CUDA support for GPU inference, or CPU fallback when CUDA
-  is unavailable.
-- Enough free disk space for the managed runtime and model cache.
+### GPU & VRAM Scaling
+| Hardware | Inference Mode | Input Resolution | Typical Speed |
+| --- | --- | --- | --- |
+| **NVIDIA GPU ≥ 6.5 GB VRAM** (RTX 2070+, 3060+, 4060+) | CUDA FP16 | `2048×2048` (with automatic `1024×1024` OOM fallback) | ~0.5 – 1.5 s |
+| **NVIDIA GPU 4 GB – 6 GB VRAM** (GTX 1650 Ti, RTX 3050 Laptop, etc.) | CUDA FP16 | `1024×1024` (with automatic `768×768` OOM fallback) | ~1 – 2.5 s |
+| **No NVIDIA GPU / CPU Fallback** | CPU FP32 | `1024×1024` | ~8 – 20 s |
 
-For development:
+## User Installation (Windows)
 
-- CMake 3.21+.
-- C++20 compiler (GCC on Linux, LLVM-MinGW Clang 21 on Windows).
-- Krita 5.3.x source tree and build tree.
-- On Windows: KDE Craft + krita-deps-management for Qt5 dependencies.
-- Qt5/KF5/Krita development dependencies required by that Krita build.
-- Python with `uv`.
-- `clang-format`.
+1. Install `uv` and Python 3.12 if you haven't already:
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   uv python install 3.12
+   ```
+2. Download **`krita-smart-select-windows-x64-0.1.1.zip`** from the [**Latest Release**](https://github.com/hjmeneses/krita-smart-select/releases/latest).
+3. Open Krita and go to **`Tools` → `Scripts` → `Import Python Plugin from File...`**.
+4. Select the downloaded `.zip` file and **restart Krita**.
+5. Verify that **`Smart Select`** is enabled under **`Settings` → `Configure Krita...` → `Python Plugin Manager`**.
+6. In the **Toolbox** (under the *Select* section), choose the **Smart Select** tool.
 
-The plugin does not install PyTorch, model dependencies or model checkpoints
-inside the plugin source tree. Runtime data is stored under Krita user data:
+### ⏳ What to Expect on First Use
+- The **very first time** you draw a lasso and click **`Select object with AI`**, the worker automatically creates an isolated Python 3.12 virtual environment under `%APPDATA%\krita\smart_select\runtime`, installs PyTorch + CUDA 12.4 wheels (~2.5 GB), and downloads the `ZhengPeng7/BiRefNet_HR-matting` checkpoint (~444 MB) into `%APPDATA%\krita\smart_select\models`.
+- **This initial setup takes 3–8 minutes** depending on your internet connection.
+- **All subsequent selections run locally in 1–3 seconds** with no internet connection required.
 
+### Package Layout Inside the Windows ZIP
 ```text
-<krita-app-data>/smart_select/
-  models/
-  runtime/
-```
-
-## User Installation
-
-### Windows
-
-Download the Windows release ZIP:
-
-```text
-krita-smart-select-windows-x64-<version>.zip
-```
-
-Install it from Krita:
-
-1. Open `Tools` -> `Scripts` -> `Import Python Plugin from File...`.
-2. Select the release ZIP.
-3. Restart Krita.
-4. Enable `Smart Select` in the Python Plugin Manager if needed.
-5. Select `Smart Select` from the toolbox (it appears in the Select section
-   alongside the other selection tools).
-
-The ZIP root contains the Python plugin package:
-
-```text
+smart_select.desktop
 smart_select/
   __init__.py
   extension.py
   worker_launcher.py
+  SmartSelectTool.action
   lib/
     kritasmartselect.dll
     libc++.dll
     libunwind.dll
     libwinpthread-1.dll
+  worker/
+    smart_select_worker.py
+    birefnet_inference.py
+    runtime_env.py
+    ...
 ```
 
-### Linux
+## Building from Source on Windows
 
-Download the Linux release ZIP from the
-[upstream project](https://github.com/BMFreed/krita-smart-select/releases):
+We provide two ways to build `kritasmartselect.dll` on Windows:
 
-```text
-krita-smart-select-linux-x64-<version>.zip
+### Fast Incremental Build (`scripts/fast_build_windows.py` — Recommended)
+Once you have extracted [LLVM-MinGW UCRT x86_64](https://github.com/mstorsjo/llvm-mingw/releases) and fetched the KDE CI Qt5/KF5 headers (see [docs/windows/build.md](docs/windows/build.md)), `scripts/fast_build_windows.py` configures CMake to generate export headers and `compile_commands.json`, compiles only the 13 C++ files of `kritasmartselect` + Qt MOC/RCC sources, and links directly against your installed Krita 5.3.x DLLs in **under 15 seconds** (without compiling all of Krita):
+
+```powershell
+$env:KRITA_SRC = "F:\krita-work\krita-src"
+$env:KRITA_BUILD = "F:\krita-work\build-windows"
+$env:KRITA_INSTALL = "F:\krita-work\krita\_install"
+$env:LLVM_MINGW = "F:\krita-work\llvm-mingw\llvm-mingw-20261020-ucrt-x86_64"
+$env:KRITA_BIN = "C:\Program Files\Krita (x64)\bin"
+
+python scripts\fast_build_windows.py
 ```
 
-Install via the same Krita import flow.
+This builds `kritasmartselect.dll` and packages `dist\krita-smart-select-windows-x64-0.1.1.zip`.
 
-On first use, draw or edit a region, press `Select object with AI`, and let the
-worker create the runtime and download the model.
-
-The release also includes a `.tar.gz` archive with the expanded install layout
-for manual inspection or manual profile installation.
-
-## Development Setup
-
-Create the development Python environment:
-
-```bash
-uv venv .venv
-uv pip install --python .venv/bin/python -r requirements-dev.txt
-```
-
-Build against a Krita 5.3.1 source/build tree:
-
-```bash
-KRITA_SRC=/home/bogdan/Work/sources/krita \
-KRITA_BUILD=/home/bogdan/Work/build/krita-5.3.1 \
-BUILD_JOBS=20 \
-./scripts/build-krita-5.3.1.sh
-```
-
-The build output is written to:
-
-```text
-dist/krita-smart-select/
-```
-
-Install the local build into Krita:
-
-```bash
-mkdir -p ~/.local/share/krita/pykrita ~/.local/share/krita/actions
-rm -rf ~/.local/share/krita/pykrita/smart_select
-cp -a dist/krita-smart-select/pykrita/smart_select ~/.local/share/krita/pykrita/
-cp dist/krita-smart-select/pykrita/smart_select.desktop ~/.local/share/krita/pykrita/
-cp dist/krita-smart-select/share/krita/actions/SmartSelectTool.action ~/.local/share/krita/actions/
-```
-
-Package a Linux archive:
-
-```bash
-./scripts/package-linux.sh 0.1.0
-```
-
-This writes two files into `dist/`:
-
-```text
-krita-smart-select-linux-x64-0.1.0.zip
-krita-smart-select-linux-x64-0.1.0.tar.gz
-```
-
-Publish those archives to GitHub Releases:
-
-```bash
-./scripts/create-github-release.sh 0.1.0
-```
-
-The release helper expects a clean worktree, creates and pushes tag `v0.1.0`,
-then creates or updates the matching GitHub Release with both assets attached.
-This is a local release flow because the package contains a native
-`kritasmartselect.so` built against Krita 5.3.1. A fully hosted GitHub Actions
-release would need a matching Krita build environment or a self-hosted runner.
-
-## Verification
-
-Run the default checks:
-
-```bash
-PYTHON=.venv/bin/python ./scripts/test-code.sh
-```
-
-This runs Python compile checks, Ruff, mypy, worker unit tests and the C++ core
-tests when the Krita source/build tree is available.
-
-Run the opt-in real inference smoke test only when model/runtime setup is
-acceptable:
-
-```bash
-SMART_SELECT_RUN_BIREFNET_SMOKE=1 PYTHON=.venv/bin/python ./scripts/test-birefnet-smoke.sh
-```
+### Full Source Tree Build
+See [docs/windows/build.md](docs/windows/build.md) and `scripts/build-windows.bat` for full Krita tree build instructions, or `scripts/build-krita-5.3.1.sh` for Linux.
 
 ## Documentation
 
+- [Windows Build Guide](docs/windows/build.md)
 - [Product Scope](docs/product-scope.md)
 - [Architecture](docs/architecture.md)
 - [Worker Protocol](docs/worker-protocol.md)
@@ -257,17 +165,12 @@ SMART_SELECT_RUN_BIREFNET_SMOKE=1 PYTHON=.venv/bin/python ./scripts/test-birefne
 
 Krita Smart Select builds on ideas, APIs and open-source work from:
 
-- [Krita](https://krita.org/) and the KDE Krita project, whose native tool,
-  selection and plugin APIs make this kind of canvas-integrated workflow
-  possible.
-- [BiRefNet](https://github.com/ZhengPeng7/BiRefNet), especially the
-  `ZhengPeng7/BiRefNet_HR-matting` model used for direct soft-alpha
-  extraction.
-- [Krita Vision Tools](https://github.com/Acly/krita-ai-tools), which provided
-  a useful reference for ML-assisted Krita tooling and user-facing selection
-  workflows.
-- [CorridorKey](https://github.com/nikopueringer/CorridorKey), which helped
-  inform the product direction toward alpha-first, plug-and-play matting.
+- **[BMFreed/krita-smart-select](https://github.com/BMFreed/krita-smart-select)** — Original creator of Krita Smart Select.
+- **[theCosmicCrafter/krita-smart-select-windows](https://github.com/theCosmicCrafter/krita-smart-select-windows)** — Initial Windows CMake/KDE CI build documentation.
+- **[Krita](https://krita.org/)** and the KDE Krita project, whose native tool, selection and plugin APIs make this canvas-integrated workflow possible.
+- **[BiRefNet](https://github.com/ZhengPeng7/BiRefNet)**, especially the `ZhengPeng7/BiRefNet_HR-matting` model used for direct soft-alpha extraction.
+- **[Krita Vision Tools](https://github.com/Acly/krita-ai-tools)**, which provided a useful reference for ML-assisted Krita tooling.
+- **[CorridorKey](https://github.com/nikopueringer/CorridorKey)**, which helped inform the product direction toward alpha-first, plug-and-play matting.
 
 ## License
 
