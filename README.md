@@ -39,7 +39,7 @@ a standard Krita pixel selection.
 - Managed user-level Python 3.12 runtime for inference dependencies (`%APPDATA%\krita\smart_select\runtime` on Windows).
 - Pinned BiRefNet HR Matting model snapshot cache (`%APPDATA%\krita\smart_select\models` on Windows).
 - Automatic VRAM-aware resolution scaling (`2048×2048` on 8 GB+ GPUs, `1024×1024` / `768×768` on 4–6 GB GPUs, or CPU fallback).
-- Local structured logs with OpenTelemetry-compatible field names.
+- Structured logs with OpenTelemetry-compatible field names (emitted to Krita's Qt debug output; see [Troubleshooting](#troubleshooting)).
 
 ## Examples
 
@@ -70,13 +70,17 @@ hard binary cutout.
 ### System Requirements
 - **OS:** Windows 10/11 (x64) or Linux (x64).
 - **Krita:** **5.3.x** (tested on Krita 5.3.4.1 on Windows and 5.3.1 on Linux).
-- **`uv` in `PATH`** with Python 3.12 available.
-  - On Windows, install `uv` and Python 3.12 in PowerShell with:
-    ```powershell
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    uv python install 3.12
-    ```
-- **Disk Space:** ~3.5 GB of free space in `%APPDATA%\krita\smart_select` for the self-managed PyTorch CUDA runtime (~2.5 GB) and `BiRefNet_HR-matting` model weights (~444 MB).
+- **Python 3.12** (exactly 3.12 — the runtime is pinned to it). Newer versions
+  such as 3.13–3.15 can stay installed alongside it; the plugin picks 3.12
+  automatically. On Windows it is located via the `py` launcher (`py -3.12`),
+  then `uv python find 3.12`, then `PATH`.
+  - Use a regular python.org / `winget` install. The **Microsoft Store** Python
+    is skipped because it redirects writes under `%APPDATA%`.
+  - `uv` is optional on Windows (it is still used on Linux).
+- **Disk Space:** ~5.5 GB free in `%APPDATA%\krita\smart_select`: the managed
+  PyTorch CUDA runtime (~4.7 GB installed) and the `BiRefNet_HR-matting`
+  weights (~444 MB).
+- **Internet** only for the one-time runtime and model download.
 
 ### GPU & VRAM Scaling
 | Hardware | Inference Mode | Input Resolution | Typical Speed |
@@ -87,10 +91,10 @@ hard binary cutout.
 
 ## User Installation (Windows)
 
-1. Install `uv` and Python 3.12 if you haven't already:
+1. Install Python 3.12 if you haven't already, and check that it is found:
    ```powershell
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   uv python install 3.12
+   winget install -e --id Python.Python.3.12
+   py -3.12 --version   # should print Python 3.12.x
    ```
 2. Download **`krita-smart-select-windows-x64-0.1.1.zip`** from the [**Latest Release**](https://github.com/hjmeneses/krita-smart-select/releases/latest).
 3. Open Krita and go to **`Tools` → `Scripts` → `Import Python Plugin from File...`**.
@@ -99,9 +103,32 @@ hard binary cutout.
 6. In the **Toolbox** (under the *Select* section), choose the **Smart Select** tool.
 
 ### ⏳ What to Expect on First Use
-- The **very first time** you draw a lasso and click **`Select object with AI`**, the worker automatically creates an isolated Python 3.12 virtual environment under `%APPDATA%\krita\smart_select\runtime`, installs PyTorch + CUDA 12.4 wheels (~2.5 GB), and downloads the `ZhengPeng7/BiRefNet_HR-matting` checkpoint (~444 MB) into `%APPDATA%\krita\smart_select\models`.
-- **This initial setup takes 3–8 minutes** depending on your internet connection.
-- **All subsequent selections run locally in 1–3 seconds** with no internet connection required.
+- The **very first time** you draw a lasso and click **`Select object with AI`**, the worker automatically creates an isolated Python 3.12 virtual environment under `%APPDATA%\krita\smart_select\runtime`, installs PyTorch + CUDA 12.4 wheels (~2.5 GB download), and downloads the `ZhengPeng7/BiRefNet_HR-matting` checkpoint (~444 MB) into `%APPDATA%\krita\smart_select\models`.
+- **This initial setup takes several minutes** depending on your connection. The
+  progress bar in Tool Options stays busy meanwhile — do not close Krita.
+- **Subsequent selections run locally** with no internet connection. The model is
+  unloaded from VRAM after each selection, so every run includes a short model
+  load.
+
+### Optional: Pre-install the Runtime and Model
+
+To avoid the wait inside Krita, prepare both with Krita closed. The runtime
+steps are in [Runtime Environment → Manual Install](docs/runtime-env.md#manual-install);
+the model can then be fetched and verified with the worker's own cache code:
+
+```powershell
+$venvPy = "$env:APPDATA\krita\smart_select\runtime\venv\Scripts\python.exe"
+& $venvPy -c @"
+import os, sys; from pathlib import Path
+sys.path.insert(0, r'$env:APPDATA\krita\pykrita\smart_select\worker')
+from alpha_model_cache import ModelCache
+from alpha_model_registry import default_model_id, get_model_spec
+root = Path(os.environ['APPDATA']) / 'krita' / 'smart_select' / 'models'
+print(ModelCache(root).ensure_downloaded(get_model_spec(default_model_id()), lambda *a: None).state)
+"@
+```
+
+It should print `verified`.
 
 ### Package Layout Inside the Windows ZIP
 ```text
@@ -123,6 +150,40 @@ smart_select/
     ...
 ```
 
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `alpha runtime requires Python 3.12…` | No Python 3.12 found. | Install it (see above), check `py -3.12 --version`, restart Krita. |
+| `alpha runtime setup failed` | A `pip install` step failed (network, disk space, or an old runtime built from the wrong Python). | Close Krita, delete `%APPDATA%\krita\smart_select\runtime\venv`, retry. Check that `%APPDATA%\krita\smart_select\runtime\venv\pyvenv.cfg` says `version = 3.12.x`. |
+| `alpha runtime dependencies are not available` | The venv exists but `torch`/`transformers` fail to import. | Same as above: delete `venv` and let it rebuild. |
+| `model download failed` / `model verification failed` | Interrupted or partial download. | Delete `%APPDATA%\krita\smart_select\models\birefnet_hr_matting` and retry. |
+| `selection is empty` on every attempt | The GPU returns NaN in FP16 (GTX 16xx). Handled automatically since the FP16 fallback; on older builds this always fails. | Update the plugin. If it persists, check that the lasso covers visible (non-transparent) pixels of the active layer. |
+| `alpha extraction ran out of GPU memory` | Lasso crop too large for the GPU. | Use a tighter lasso region; close other GPU-heavy apps. |
+| Button stays busy for a long time | First-run setup in progress (see above). | Wait; it only happens once. |
+
+**Check your setup** from PowerShell:
+
+```powershell
+Get-Content "$env:APPDATA\krita\smart_select\runtime\runtime.json"   # runtime_version, python_version 3.12, cuda_available
+Get-Content "$env:APPDATA\krita\smart_select\runtime\venv\pyvenv.cfg" # version = 3.12.x
+Get-ChildItem "$env:APPDATA\krita\smart_select\models" -Recurse -Filter model.safetensors
+```
+
+**Logs:** the plugin and worker write `[SmartSelect]` / `[SmartSelectWorker]`
+structured lines to Krita's Qt debug output, **not** to `krita.log`. On Windows,
+capture them with [DebugView](https://learn.microsoft.com/sysinternals/downloads/debugview)
+while reproducing the problem. Runtime install failures are logged as
+`runtime.process.failed` with the tail of the `pip` output.
+
+### Uninstall / Full Reset
+
+1. Close Krita.
+2. Delete `%APPDATA%\krita\pykrita\smart_select` and `%APPDATA%\krita\pykrita\smart_select.desktop` (the plugin).
+3. Delete `%APPDATA%\krita\smart_select` (runtime and model caches, ~5 GB).
+
+To only force a clean runtime rebuild, delete just `%APPDATA%\krita\smart_select\runtime`.
+
 ## Building from Source on Windows
 
 We provide two ways to build `kritasmartselect.dll` on Windows:
@@ -140,7 +201,19 @@ $env:KRITA_BIN = "C:\Program Files\Krita (x64)\bin"
 python scripts\fast_build_windows.py
 ```
 
-This builds `kritasmartselect.dll` and packages `dist\krita-smart-select-windows-x64-0.1.1.zip`.
+This builds `kritasmartselect.dll` (output in `$env:KRITA_BUILD\bin`) and packages `dist\krita-smart-select-windows-x64-0.1.1.zip`.
+
+To test a local build without re-importing the ZIP, close Krita and copy
+`dist\python-plugin\smart_select\*` over `%APPDATA%\krita\pykrita\smart_select\`.
+Changes limited to Python files (`worker/`, `python/smart_select/`) need no
+C++ rebuild — copy them and restart Krita.
+
+Run the worker unit tests with Python 3.12:
+
+```powershell
+$mods = Get-ChildItem tests\worker -Filter test_*.py | ForEach-Object { "tests.worker.$($_.BaseName)" }
+py -3.12 -m unittest @mods
+```
 
 ### Full Source Tree Build
 See [docs/windows/build.md](docs/windows/build.md) and `scripts/build-windows.bat` for full Krita tree build instructions, or `scripts/build-krita-5.3.1.sh` for Linux.
