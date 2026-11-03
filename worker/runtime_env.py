@@ -38,6 +38,10 @@ class RuntimeBootstrapError(RuntimeEnvError):
     pass
 
 
+class RuntimePythonMismatch(RuntimeBootstrapError):
+    pass
+
+
 class RuntimeDependencyError(RuntimeEnvError):
     pass
 
@@ -123,6 +127,10 @@ def ensure_runtime(
         (root / "pip-cache").mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise RuntimeCacheDirMissing("runtime cache is not writable") from exc
+
+    # Check before runtime_status(): on the wrong interpreter a good 3.12 venv
+    # reads as "invalid" and would be deleted below.
+    _require_runtime_python()
 
     status = runtime_status(root)
     progress("checking_runtime", None, {"runtime_state": status.state})
@@ -324,6 +332,27 @@ def _run_process(
             },
         )
         raise RuntimeBootstrapError("alpha runtime setup failed")
+
+
+def _require_runtime_python() -> None:
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current == RUNTIME_PYTHON_VERSION:
+        return
+    log_event(
+        "runtime.python.mismatch",
+        severity="error",
+        component="runtime_env",
+        **{
+            "runtime.python.version": RUNTIME_PYTHON_VERSION,
+            "python.version": current,
+            "python.executable": sys.executable,
+            "error.type": "RuntimePythonMismatch",
+        },
+    )
+    raise RuntimePythonMismatch(
+        f"alpha runtime requires Python {RUNTIME_PYTHON_VERSION}, "
+        f"but the worker is running on Python {current}"
+    )
 
 
 def _check_cancelled(context: JobContext | None) -> None:

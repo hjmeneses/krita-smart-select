@@ -378,6 +378,8 @@ def _save_debug_mask(image_module: Any, path: Path, data: bytes, width: int, hei
 def error_type_for_runtime_error(exc: runtime_env.RuntimeEnvError) -> str:
     if isinstance(exc, runtime_env.RuntimeCacheDirMissing):
         return "RuntimeCacheDirMissing"
+    if isinstance(exc, runtime_env.RuntimePythonMismatch):
+        return "RuntimePythonMismatch"
     if isinstance(exc, runtime_env.RuntimeDependencyError):
         return "RuntimeDependencyError"
     if isinstance(exc, runtime_env.RuntimeValidationError):

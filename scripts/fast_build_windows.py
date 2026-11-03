@@ -24,7 +24,7 @@ LLVM_MINGW = Path(
 INSTALLED_KRITA_BIN = Path(
     os.environ.get("KRITA_BIN", r"C:\Program Files\Krita (x64)\bin")
 )
-VERSION = os.environ.get("SMART_SELECT_VERSION", "0.1.1")
+VERSION = os.environ.get("SMART_SELECT_VERSION", "0.1.2")
 
 
 def setup_env() -> dict[str, str]:

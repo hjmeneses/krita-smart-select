@@ -18,6 +18,36 @@ from worker import birefnet_inference, runtime_env  # noqa: E402
 class BiRefNetInferenceTests(unittest.TestCase):
     def setUp(self) -> None:
         birefnet_inference._MODEL_CACHE.clear()
+        birefnet_inference._fp16_disabled = False
+        self.addCleanup(setattr, birefnet_inference, "_fp16_disabled", False)
+
+    def test_gtx_16xx_skips_fp16(self) -> None:
+        with self._patched_runtime(cuda_available=True) as fake:
+            fake.torch.device_name = "NVIDIA GeForce GTX 1650 Ti"
+            result = birefnet_inference.predict_alpha(
+                get_model_spec("birefnet_hr_matting"),
+                Path("/tmp/model"),
+                self._runtime_ready(),
+                object(),
+            )
+
+        self.assertEqual(result.device, "cuda")
+        self.assertEqual([model.half_calls for model in fake.models], [0])
+
+    def test_fp16_nan_output_retries_in_fp32(self) -> None:
+        with self._patched_runtime(cuda_available=True) as fake:
+            fake.torch.nan_for_half = True
+            result = birefnet_inference.predict_alpha(
+                get_model_spec("birefnet_hr_matting"),
+                Path("/tmp/model"),
+                self._runtime_ready(),
+                object(),
+            )
+
+        self.assertEqual(result.device, "cuda")
+        self.assertEqual([model.half_calls for model in fake.models], [1, 0])
+        self.assertTrue(birefnet_inference._fp16_disabled)
+        self.assertEqual(result.crop_alpha, bytes([0, 64, 128, 192, 224, 255]))
 
     def test_cuda_available_chooses_cuda_and_uses_trust_remote_code(self) -> None:
         with self._patched_runtime(cuda_available=True) as fake:
@@ -29,7 +59,7 @@ class BiRefNetInferenceTests(unittest.TestCase):
             )
 
         self.assertEqual(result.device, "cuda")
-        self.assertEqual(fake.from_pretrained_calls[0]["path"], "/tmp/model")
+        self.assertEqual(fake.from_pretrained_calls[0]["path"], str(Path("/tmp/model")))
         self.assertTrue(fake.from_pretrained_calls[0]["trust_remote_code"])
         self.assertEqual(fake.resize_sizes, [(2048, 2048)])
 
@@ -161,8 +191,11 @@ class _FakeTorch:
     def __init__(self, cuda_available: bool) -> None:
         self.empty_cache_calls = 0
         self.ipc_collect_calls = 0
+        self.device_name = "NVIDIA GeForce RTX 3060"
+        self.nan_for_half = False
         self.cuda = types.SimpleNamespace(
             is_available=lambda: cuda_available,
+            get_device_name=lambda _index: self.device_name,
             memory_allocated=lambda: 123,
             memory_reserved=lambda: 456,
             empty_cache=self._empty_cache,
@@ -175,6 +208,9 @@ class _FakeTorch:
     def _ipc_collect(self) -> None:
         self.ipc_collect_calls += 1
 
+    def isnan(self, prediction: _FakePrediction) -> _FakeBool:
+        return _FakeBool(self.nan_for_half and prediction.half)
+
     @staticmethod
     def set_float32_matmul_precision(_mode: str) -> None:
         return None
@@ -182,6 +218,14 @@ class _FakeTorch:
     @staticmethod
     def inference_mode() -> _NoopContext:
         return _NoopContext()
+
+
+class _FakeBool:
+    def __init__(self, value: bool) -> None:
+        self.value = value
+
+    def any(self) -> bool:
+        return self.value
 
 
 class _NoopContext:
@@ -196,6 +240,7 @@ class _FakeModel:
     def __init__(self, raise_oom: bool) -> None:
         self.raise_oom = raise_oom
         self.device = ""
+        self.half_calls = 0
 
     def to(self, device: str) -> _FakeModel:
         self.device = device
@@ -205,15 +250,19 @@ class _FakeModel:
         return self
 
     def half(self) -> _FakeModel:
+        self.half_calls += 1
         return self
 
     def __call__(self, _tensor: object) -> list[_FakePrediction]:
         if self.raise_oom:
             raise RuntimeError("CUDA out of memory")
-        return [_FakePrediction()]
+        return [_FakePrediction(half=self.half_calls > 0)]
 
 
 class _FakePrediction:
+    def __init__(self, half: bool = False) -> None:
+        self.half = half
+
     def sigmoid(self) -> _FakePrediction:
         return self
 

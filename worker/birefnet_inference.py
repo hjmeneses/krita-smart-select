@@ -36,7 +36,7 @@ class BiRefNetResult:
     duration_ms: int
 
 
-_MODEL_CACHE: dict[tuple[str, str, str], Any] = {}
+_MODEL_CACHE: dict[tuple[str, str, str, bool], Any] = {}
 
 
 def release_runtime_memory() -> None:
@@ -139,10 +139,11 @@ def predict_alpha(
 
     for attempt_device, attempt_res in attempts:
         try:
-            model = _load_model(spec, snapshot_dir, attempt_device)
+            half = attempt_device == "cuda" and _fp16_supported(torch)
+            model = _load_model(spec, snapshot_dir, attempt_device, half)
             image_tensor = _preprocess_image(crop_image, attempt_res, transforms)
             image_tensor = image_tensor.unsqueeze(0).to(attempt_device)
-            if attempt_device == "cuda":
+            if half:
                 image_tensor = image_tensor.half()
 
             log_event(
@@ -152,6 +153,7 @@ def predict_alpha(
                     "model.id": spec.id,
                     "device.type": attempt_device,
                     "input.resolution": attempt_res,
+                    "model.precision": "fp16" if half else "fp32",
                     "image.width": width,
                     "image.height": height,
                 },
@@ -159,6 +161,16 @@ def predict_alpha(
             started = time.monotonic()
             with torch.inference_mode():
                 prediction = model(image_tensor)[-1].sigmoid().detach().cpu()
+                if half and _has_nan(torch, prediction):
+                    # Some GPUs (notably GTX 16xx) overflow in FP16 and return an
+                    # all-NaN mask, which ends up as an empty selection. Retry in
+                    # FP32 and stop using FP16 for the rest of this worker's life.
+                    model = image_tensor = prediction = None
+                    _mark_fp16_unsupported(spec, attempt_device)
+                    model = _load_model(spec, snapshot_dir, attempt_device, False)
+                    image_tensor = _preprocess_image(crop_image, attempt_res, transforms)
+                    image_tensor = image_tensor.unsqueeze(0).to(attempt_device)
+                    prediction = model(image_tensor)[-1].sigmoid().detach().cpu()
             duration_ms = round((time.monotonic() - started) * 1000)
             used_device = attempt_device
             break
@@ -219,8 +231,42 @@ def runtime_ready_version() -> str:
     return str(runtime_manifest.RUNTIME_VERSION)
 
 
-def _load_model(spec: ModelSpec, snapshot_dir: Path, device: str) -> Any:
-    key = (spec.id, str(snapshot_dir), device)
+_FP16_UNSUPPORTED_GPU_MARKERS = ("GTX 16",)
+_fp16_disabled = False
+
+
+def _fp16_supported(torch: Any) -> bool:
+    if _fp16_disabled:
+        return False
+    try:
+        name = str(torch.cuda.get_device_name(0))
+    except Exception:
+        return True
+    return not any(marker in name for marker in _FP16_UNSUPPORTED_GPU_MARKERS)
+
+
+def _has_nan(torch: Any, tensor: Any) -> bool:
+    try:
+        return bool(torch.isnan(tensor).any())
+    except Exception:
+        return False
+
+
+def _mark_fp16_unsupported(spec: ModelSpec, device: str) -> None:
+    global _fp16_disabled
+    _fp16_disabled = True
+    # Drop the FP16 weights before loading the FP32 copy so both never share VRAM.
+    release_runtime_memory()
+    log_event(
+        "alpha_model.predict.fp16_nan",
+        severity="warning",
+        component="birefnet",
+        **{"model.id": spec.id, "device.type": device, "model.precision": "fp32"},
+    )
+
+
+def _load_model(spec: ModelSpec, snapshot_dir: Path, device: str, half: bool) -> Any:
+    key = (spec.id, str(snapshot_dir), device, half)
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
         return cached
@@ -239,7 +285,7 @@ def _load_model(spec: ModelSpec, snapshot_dir: Path, device: str) -> Any:
     )
     model.to(device)
     model.eval()
-    if device == "cuda":
+    if half:
         model.half()
     _MODEL_CACHE[key] = model
     log_event(
