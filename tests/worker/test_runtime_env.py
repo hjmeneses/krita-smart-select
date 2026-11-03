@@ -17,12 +17,74 @@ from worker.runtime_manifest import RUNTIME_PYTHON_VERSION, RUNTIME_VERSION  # n
 
 from worker import runtime_env  # noqa: E402
 
+_REAL_REQUIRE_RUNTIME_PYTHON = runtime_env._require_runtime_python
+
 
 class RuntimeEnvTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Bootstrap tests must not depend on the interpreter running the suite.
+        original = runtime_env._require_runtime_python
+        runtime_env._require_runtime_python = lambda: None
+        self.addCleanup(setattr, runtime_env, "_require_runtime_python", original)
+
+    def test_ensure_runtime_rejects_wrong_python_before_creating_venv(self) -> None:
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            original_require = runtime_env._require_runtime_python
+            original_create = runtime_env._create_venv
+            original_version = runtime_env.RUNTIME_PYTHON_VERSION
+            try:
+                runtime_env.RUNTIME_PYTHON_VERSION = "2.7"
+                runtime_env._require_runtime_python = _REAL_REQUIRE_RUNTIME_PYTHON
+                runtime_env._create_venv = lambda *_args, **_kwargs: calls.append("create")
+
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(runtime_env.RuntimeBootstrapError) as ctx:
+                        runtime_env.ensure_runtime(
+                            root, lambda _stage, _progress, _extra: None
+                        )
+            finally:
+                runtime_env.RUNTIME_PYTHON_VERSION = original_version
+                runtime_env._create_venv = original_create
+                runtime_env._require_runtime_python = original_require
+
+        self.assertEqual(calls, [])
+        self.assertIn("requires Python 2.7", str(ctx.exception))
+        self.assertIsInstance(ctx.exception, runtime_env.RuntimePythonMismatch)
+
+    def test_wrong_python_keeps_existing_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            python_path = runtime_env._venv_python_executable(root / "venv")
+            python_path.parent.mkdir(parents=True)
+            python_path.write_text("", encoding="utf-8")
+            marker = root / "runtime.json"
+            marker.write_text(
+                json.dumps(
+                    {"runtime_version": RUNTIME_VERSION, "python_version": RUNTIME_PYTHON_VERSION}
+                ),
+                encoding="utf-8",
+            )
+            original_require = runtime_env._require_runtime_python
+            original_version = runtime_env.RUNTIME_PYTHON_VERSION
+            try:
+                runtime_env.RUNTIME_PYTHON_VERSION = "2.7"
+                runtime_env._require_runtime_python = _REAL_REQUIRE_RUNTIME_PYTHON
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(runtime_env.RuntimePythonMismatch):
+                        runtime_env.ensure_runtime(root, lambda _stage, _progress, _extra: None)
+            finally:
+                runtime_env.RUNTIME_PYTHON_VERSION = original_version
+                runtime_env._require_runtime_python = original_require
+
+            self.assertTrue(python_path.exists())
+            self.assertTrue(marker.exists())
+
     def test_runtime_status_reports_ready_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            python_path = root / "venv" / "bin" / "python"
+            python_path = runtime_env._venv_python_executable(root / "venv")
             python_path.parent.mkdir(parents=True)
             python_path.write_text("#!/usr/bin/env python\n", encoding="utf-8")
             (root / "runtime.json").write_text(
@@ -43,7 +105,7 @@ class RuntimeEnvTests(unittest.TestCase):
     def test_runtime_status_reports_invalid_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            python_path = root / "venv" / "bin" / "python"
+            python_path = runtime_env._venv_python_executable(root / "venv")
             python_path.parent.mkdir(parents=True)
             python_path.write_text("#!/usr/bin/env python\n", encoding="utf-8")
             (root / "runtime.json").write_text(
@@ -64,7 +126,7 @@ class RuntimeEnvTests(unittest.TestCase):
         calls: list[str] = []
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            python_path = root / "venv" / "bin" / "python"
+            python_path = runtime_env._venv_python_executable(root / "venv")
             site_packages = root / "venv" / "lib" / "python3.12" / "site-packages"
             python_path.parent.mkdir(parents=True)
             site_packages.mkdir(parents=True)
@@ -128,7 +190,7 @@ class RuntimeEnvTests(unittest.TestCase):
                 runtime_env._validate_runtime = lambda _root: runtime_env.RuntimeReady(
                     root=root,
                     venv_path=root / "venv",
-                    python_executable=root / "venv" / "bin" / "python",
+                    python_executable=runtime_env._venv_python_executable(root / "venv"),
                     site_packages=root / "venv" / "site-packages",
                     torch_version="2.6.0",
                     cuda_available=False,

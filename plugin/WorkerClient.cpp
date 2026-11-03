@@ -75,9 +75,14 @@ bool WorkerClient::start(const QString& pythonExecutable, const QString& workerS
         if (hostPython.isEmpty()) {
             hostPython = QStandardPaths::findExecutable(QStringLiteral("python3"));
         }
+        // The launcher only needs a stdlib Python; it re-execs the worker on 3.12.
+        const QString pyLauncher = QStandardPaths::findExecutable(QStringLiteral("py"));
         if (!hostPython.isEmpty()) {
             args.prepend(program);
             program = hostPython;
+        } else if (!pyLauncher.isEmpty()) {
+            args = QStringList { QStringLiteral("-3.12"), program, workerScript };
+            program = pyLauncher;
         } else {
             QString uvExe = QStandardPaths::findExecutable(QStringLiteral("uv"));
             if (!uvExe.isEmpty()) {

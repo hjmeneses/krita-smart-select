@@ -146,6 +146,8 @@ class SmartSelectExtension(Extension):
 
 def _worker_executable(package_dir: Path) -> str:
     launcher = package_dir / "worker_launcher.py"
-    if launcher.exists() and shutil.which("uv") is not None:
+    # On Windows the native side runs the .py launcher with the host Python, and
+    # the launcher re-execs the worker on the runtime Python (3.12) via py/uv.
+    if launcher.exists() and (sys.platform.startswith("win") or shutil.which("uv") is not None):
         return str(launcher)
     return shutil.which("python3") or shutil.which("python") or sys.executable

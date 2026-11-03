@@ -62,6 +62,9 @@ QString userMessageForWorkerError(const QString& type, const QString& fallbackMe
     if (type == QStringLiteral("RuntimeCacheDirMissing")) {
         return i18n("runtime cache is not writable");
     }
+    if (type == QStringLiteral("RuntimePythonMismatch")) {
+        return i18n("alpha runtime requires Python 3.12; install it (py -3.12) and restart Krita");
+    }
     if (type == QStringLiteral("RuntimeBootstrapError")) {
         return i18n("alpha runtime setup failed");
     }
