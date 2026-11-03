@@ -79,10 +79,10 @@ This produces `build-windows\bin\kritasmartselect.dll`.
 
 ```powershell
 $env:LLVM_MINGW = "F:\krita-work\llvm-mingw\llvm-mingw-20251216-ucrt-x86_64"
-.\scripts\package-windows.ps1 -Version 0.1.1 -BuildDir .\build-windows
+.\scripts\package-windows.ps1 -Version 0.1.2 -BuildDir .\build-windows
 ```
 
-This produces `dist\krita-smart-select-windows-x64-0.1.1.zip`.
+This produces `dist\krita-smart-select-windows-x64-0.1.2.zip`.
 
 ## Runtime DLLs
 

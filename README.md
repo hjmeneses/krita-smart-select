@@ -4,7 +4,7 @@ A cross-platform **Windows & Linux** edition of [Krita Smart Select](https://git
 — an AI-assisted lasso selection plugin for Krita 5.3.x that creates soft alpha object
 masks locally using **BiRefNet HR Matting**.
 
-> **📦 Pre-built Windows Release Available:** Download **`krita-smart-select-windows-x64-0.1.1.zip`** directly from [**Releases**](https://github.com/hjmeneses/krita-smart-select/releases/latest) — no C++ compilation required.
+> **📦 Pre-built Windows Release Available:** Download **`krita-smart-select-windows-x64-0.1.2.zip`** directly from [**Releases**](https://github.com/hjmeneses/krita-smart-select/releases/latest) — no C++ compilation required.
 
 ## Relationship to Upstream
 
@@ -13,7 +13,7 @@ The original project by [BMFreed](https://github.com/BMFreed/krita-smart-select)
 | | Upstream (`BMFreed`) | This Fork (`hjmeneses`) |
 | --- | --- | --- |
 | **Platform** | Linux | **Windows 10/11 (x64)** & Linux |
-| **Pre-built Release** | Linux `.zip` / `.tar.gz` | **Windows `.zip`** (`krita-smart-select-windows-x64-0.1.1.zip`) |
+| **Pre-built Release** | Linux `.zip` / `.tar.gz` | **Windows `.zip`** (`krita-smart-select-windows-x64-0.1.2.zip`) |
 | **Compiler** | GCC | LLVM-MinGW Clang (UCRT x86_64) / GCC |
 | **Qt/Krita deps** | System packages | KDE CI artifact cache + installed Krita 5.3.x ABI |
 | **Native artifact** | `kritasmartselect.so` | `kritasmartselect.dll` + Clang runtime DLLs |
@@ -96,7 +96,7 @@ hard binary cutout.
    winget install -e --id Python.Python.3.12
    py -3.12 --version   # should print Python 3.12.x
    ```
-2. Download **`krita-smart-select-windows-x64-0.1.1.zip`** from the [**Latest Release**](https://github.com/hjmeneses/krita-smart-select/releases/latest).
+2. Download **`krita-smart-select-windows-x64-0.1.2.zip`** from the [**Latest Release**](https://github.com/hjmeneses/krita-smart-select/releases/latest).
 3. Open Krita and go to **`Tools` → `Scripts` → `Import Python Plugin from File...`**.
 4. Select the downloaded `.zip` file and **restart Krita**.
 5. Verify that **`Smart Select`** is enabled under **`Settings` → `Configure Krita...` → `Python Plugin Manager`**.
@@ -201,7 +201,7 @@ $env:KRITA_BIN = "C:\Program Files\Krita (x64)\bin"
 python scripts\fast_build_windows.py
 ```
 
-This builds `kritasmartselect.dll` (output in `$env:KRITA_BUILD\bin`) and packages `dist\krita-smart-select-windows-x64-0.1.1.zip`.
+This builds `kritasmartselect.dll` (output in `$env:KRITA_BUILD\bin`) and packages `dist\krita-smart-select-windows-x64-0.1.2.zip`.
 
 To test a local build without re-importing the ZIP, close Krita and copy
 `dist\python-plugin\smart_select\*` over `%APPDATA%\krita\pykrita\smart_select\`.

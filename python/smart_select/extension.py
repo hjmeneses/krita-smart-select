@@ -60,7 +60,7 @@ class SmartSelectExtension(Extension):
         _log_event(
             "setup.start",
             **{
-                "plugin.version": "0.1.1-windows",
+                "plugin.version": "0.1.2-windows",
                 "runtime.python.version": sys.version.split()[0],
                 "python.executable.path": sys.executable,
                 "platform.name": platform.platform(),
